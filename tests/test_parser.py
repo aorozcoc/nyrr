@@ -131,3 +131,23 @@ def test_year_scoped_event_ids_and_url_validation():
     assert not registration_url_is_valid("http://register.nyrr.org/?event=a&option=b", hosts)
     assert not registration_url_is_valid("https://register.nyrr.org/?event=a", hosts)
     assert not registration_url_is_valid(None, hosts)
+
+
+def _no_options(html):
+    import re
+    return re.sub(r'<div data-registration-options="">.*?</div></div></div></div>', "</div></div></div>", html, flags=re.S)
+
+
+def test_not_yet_open_event_without_shift_list_is_not_a_parser_error():
+    """Live 2026-10-24: 'Course Volunteers' (Coming Soon, No +1) has no shift list at all."""
+    from src.models import CalendarEntry
+    html = _no_options(fixture_text("event_race_to_deliver_2026-10-24.html")).replace(
+        "<article", "<div").replace("data-registration-option-id", "data-x")
+    entry = CalendarEntry(event_id="2026/race-to-deliver-4m-to-benefit-gods-love-we-deliver-volunteers",
+                          event_name="x", event_url=BASE + RTD, start=None, end=None, status="coming-soon",
+                          tags=("No +1",))
+    event, shifts = parse_event_page(html, BASE + RTD, T0, tz=TZ, calendar_entry=entry)
+    assert shifts == [] and event.event_date == date(2026, 11, 22)
+    open_entry = entry.model_copy(update={"status": "limited-availability"})
+    with pytest.raises(ParserError):  # an event the calendar shows as open must have shifts
+        parse_event_page(html, BASE + RTD, T0, tz=TZ, calendar_entry=open_entry)

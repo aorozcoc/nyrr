@@ -63,6 +63,9 @@ def restriction_status(role: str, description: str) -> bool | None:
     return False
 
 
+OPEN_EVENT_SLUGS = frozenset({"available", "limited-availability", "near-capacity"})
+
+
 class ParserError(Exception):
     """The page did not have the structure the monitor relies on."""
 
@@ -243,7 +246,21 @@ def parse_event_page(
 
     container = soup.select_one("[data-registration-options]")
     if container is None:
-        raise ParserError(f"{event_id}: registration options container missing")
+        # Events that are not open yet (e.g. "Coming Soon") legitimately have no shift list.
+        # Only an event the calendar shows as open, or a page that still has shift articles,
+        # indicates a real structure change.
+        status = (calendar_entry.status or "") if calendar_entry else ""
+        if (calendar_entry is None or status in OPEN_EVENT_SLUGS
+                or soup.select_one("article[data-registration-option-id]") is not None):
+            raise ParserError(f"{event_id}: registration options container missing")
+        container = None
+
+    if container is None:
+        return VolunteerEvent(
+            event_id=event_id, event_name=name, event_date=start.astimezone(tz).date(), location=location,
+            event_url=url, event_end_date=end.astimezone(tz).date() if end else None,
+            event_status=calendar_entry.status if calendar_entry else None,
+            tags=calendar_entry.tags if calendar_entry else (), description=""), []
 
     hero = soup.select_one('[data-block-type="event-hero"]')
     event_tags = tuple(_norm_tag(li.get_text()) for li in hero.select("ul li")) if hero else ()

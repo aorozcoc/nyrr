@@ -163,3 +163,9 @@ def test_review2b_multi_day_event_within_2026_still_verifies():
 def test_review8_restriction_detection(role, desc, expected):
     from src.parser import restriction_status
     assert restriction_status(role, desc) is expected
+
+
+def test_live_status_slugs_seen_2026_10_24():
+    assert ev(event(), shift(availability_status="near-capacity")).eligible
+    r = ev(event(), shift(availability_status="completed", registration_url=None))
+    assert r.classification == "UNAVAILABLE" and "REGISTRATION_CLOSED" in r.reason_codes

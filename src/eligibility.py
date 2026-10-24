@@ -15,9 +15,9 @@ from zoneinfo import ZoneInfo
 from .models import Classification, EligibilityResult, ReasonCode, VolunteerEvent, VolunteerShift
 from .parser import registration_url_is_valid
 
-AVAILABLE_SLUGS = frozenset({"available", "limited-availability"})
+AVAILABLE_SLUGS = frozenset({"available", "limited-availability", "near-capacity"})
 SOLD_OUT_SLUGS = frozenset({"sold-out", "full", "waitlist"})
-CLOSED_SLUGS = frozenset({"closed", "registration-closed", "coming-soon", "cancelled", "canceled"})
+CLOSED_SLUGS = frozenset({"closed", "registration-closed", "coming-soon", "cancelled", "canceled", "completed"})
 
 NEGATIVE = {
     ReasonCode.WRONG_YEAR, ReasonCode.EVENT_PASSED, ReasonCode.MEDICAL_ROLE, ReasonCode.NO_PLUS_ONE,

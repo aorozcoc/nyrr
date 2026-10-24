@@ -1,0 +1,9 @@
+# Runtime dependencies — Python 3.12. Direct dependencies pinned to exact tested versions.
+# Transitive versions used in testing: httpcore 1.0.9, h11 0.16.0, anyio 4.15.1, idna 3.20,
+# certifi 2026.10.23, soupsieve 2.9.2, pydantic-core 2.46.5, annotated-types 0.8.0,
+# typing-extensions 4.16.0, typing-inspection 0.4.4.
+# After the first successful CI install, `pip freeze > requirements.lock` can freeze these too.
+httpx==0.28.1
+beautifulsoup4==4.15.0
+pydantic==2.13.5
+psycopg[binary]==3.3.6

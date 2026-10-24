@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-only-throwaway
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Throw-away CI database only. No production secrets are available to this workflow.
+      TEST_DATABASE_URL: postgresql://postgres:ci-only-throwaway@localhost:5432/postgres
+      TZ: America/New_York
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Python setup
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        run: |
+          coverage run --source=src -m pytest -q
+          coverage report -m
+          # spec §16: >= 90% for eligibility, state-transition and notification logic
+          coverage report --include="src/eligibility.py,src/repository.py,src/notifier.py" --fail-under=90
+
+      - name: Dependency vulnerability audit
+        run: pip-audit -r requirements.txt --strict

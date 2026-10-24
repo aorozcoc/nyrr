@@ -1,0 +1,108 @@
+name: NYRR 9+1 Monitor
+
+# Lite setup: no external database or e-mail service accounts.
+# - State: PostgreSQL runs inside the job and is saved to the `monitor-state` branch after each run.
+# - E-mail: Gmail (SMTP + app password).
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # target :00 :15 :30 :45 UTC; GitHub may delay or skip scheduled runs
+  workflow_dispatch:
+    inputs:
+      send_test_email:
+        description: 'Also send one TEST notification to both recipients before monitoring'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nyrr-monitor-production
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write   # only to push the state branch
+    outputs:
+      expired: ${{ steps.run.outputs.expired }}
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: job-local-only   # throw-away database inside this job; not a secret
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 3s --health-timeout 3s --health-retries 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Python setup
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Restore state
+        id: restore
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: bash scripts/state_store.sh restore
+
+      - name: Send test notification
+        if: github.event_name == 'workflow_dispatch' && inputs.send_test_email
+        env:
+          EMAIL_PROVIDER: gmail
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          APP_ENV: production
+        run: python scripts/test_email.py --confirm-send
+
+      - name: Execute monitor
+        id: run
+        env:
+          DATABASE_URL: postgresql://postgres:job-local-only@localhost:5432/postgres
+          EMAIL_PROVIDER: gmail
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          # Repository variables (not secrets): safety switches the owner flips deliberately.
+          NYRR_COLLECTION_AUTHORIZED: ${{ vars.NYRR_COLLECTION_AUTHORIZED }}
+          ALERTS_ENABLED: ${{ vars.ALERTS_ENABLED }}
+          NYRR_CONTACT_EMAIL: ${{ vars.NYRR_CONTACT_EMAIL }}
+          MONITOR_TRIGGER: ${{ github.event_name }}
+          APP_ENV: production
+          TZ: America/New_York
+        run: python -m src.main
+
+      - name: Save state
+        if: always() && steps.restore.outcome == 'success'
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: bash scripts/state_store.sh save
+
+  # After 2026-12-31 (ET) the app stops by itself; this also turns off the schedule.
+  disable-after-expiry:
+    needs: monitor
+    if: needs.monitor.outputs.expired == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - name: Disable monitor and health schedules
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow disable monitor.yml --repo "$GITHUB_REPOSITORY"
+          gh workflow disable health.yml --repo "$GITHUB_REPOSITORY"

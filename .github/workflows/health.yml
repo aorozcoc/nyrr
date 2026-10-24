@@ -1,0 +1,55 @@
+name: NYRR Monitor Health Check
+
+# Independent of monitor.yml. Every completed monitor run saves state to the `monitor-state` branch,
+# so the age of that branch's last commit tells whether the monitor is still running.
+# If no run has completed for 45–105 minutes, both recipients get one SYSTEM HEALTH ALERT e-mail and
+# this job fails (GitHub also e-mails the repository owner). Other problems (NYRR errors, page changes,
+# e-mail failures) are detected inside each monitor run and e-mailed once per incident.
+on:
+  schedule:
+    - cron: '37 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nyrr-monitor-health
+  cancel-in-progress: false
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Python setup
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Read last saved state time
+        id: last
+        run: |
+          if git fetch --quiet --depth=1 origin monitor-state 2>/dev/null; then
+            echo "epoch=$(git log -1 --format=%ct FETCH_HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check freshness
+        env:
+          LAST_EPOCH: ${{ steps.last.outputs.epoch }}
+          EMAIL_PROVIDER: gmail
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          APP_ENV: production
+          TZ: America/New_York
+        run: python -m src.main freshness ${LAST_EPOCH:+--last-state-epoch "$LAST_EPOCH"}
